@@ -1,0 +1,7 @@
+click==8.1.7
+numpy==2.2.4
+oaklib==0.6.21
+openai==1.69.0
+pandas==2.2.3
+rdflib==7.1.4
+tqdm==4.67.1
