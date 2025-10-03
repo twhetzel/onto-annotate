@@ -38,13 +38,13 @@ The tool has an option to use the OpenAI API to annotate text not otherwise matc
 ## Usage
 Annotate your text files as:
 ```
-onto_annotate/run_pipeline.py annotate \
+onto-annotate annotate \
     --config config/config.yml \
     --input_file data/demo_data/conditions_simple.tsv \
-    --output_dir data/output/ \
-    --refresh \
+    --output_dir data/output \
     --no_openai
 ```
+
 
 NOTES:
 1. Include `-vv` before `annotate` to generate debug output.
