@@ -15,3 +15,6 @@ where = ["src"]
 
 [project.scripts]
 onto-annotate = "onto_annotate.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "click>=8.1"]

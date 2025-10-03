@@ -19,7 +19,7 @@ The prerequisites to run the script can either be installed using the `requireme
 
 ## Install in editable mode
 To make the `onto-annotate` command available in your environment from the root of the project directory run:
-`pip install -e .`
+`pip install -e ".[dev]"`
 
 Use of the `-e` flag means that any code changes to files in `src/onto_annotate` will take effect immediately without reinstalling.
 
@@ -53,6 +53,26 @@ NOTES:
 1. `--use_openai` flag to skip LLM-based annotation, if true search with LLM approaches are used. The default is false.
 
 
+## Data File
+The script reads and writes TSV files. The prefixes of the ontologies to be used for the annotation can be added into the config.yml file.
+
+### Input file
+See example input file `conditions_simple.tsv` in `toy_data/raw_data_conditions`.
+
+### Output file
+Example output file: 
+
+```
+condition_source_text	UUID	mondo_result_curie	mondo_result_label	mondo_result_match_type	annotation_source	annotation_method	ontology	alt_names	hpo_result_curie	hpo_result_label	hpo_result_match_type	maxo_result_curie	maxo_result_label	maxo_result_match_type
+ASD	7317c559-ff88-4c31-8608-77615b20b267	MONDO:0006664	atrial septal defect	MONDO_EXACT_ALIAS	oak	exact_synonym	mondo							
+ASD	7317c559-ff88-4c31-8608-77615b20b267				oak	exact_synonym	hp		HP:0000729, HP:0001631	Autistic behavior, Atrial septal defect	HPO_EXACT_ALIAS			
+ASD	7317c559-ff88-4c31-8608-77615b20b267				openai	no_match	maxo	autism spectrum disorder, atrial septal defect, advanced sleep phase disorder, asynchronous serial data, active server directory						
+```
+
+## Run Tests
+Pytest is used as the testing framework and all tests can be run (in quiet mode) as: `pytest -q`
+
+
 ### Optional Make Command
 `make annotate input_file=toy_data/raw_data_conditions/conditions_simple.tsv output_dir=harmonica/tmp/output refresh=true`
 (the `make` command is run from the root of the project)
@@ -78,19 +98,3 @@ OAK references:
 
 TODO: Include other methods to download ontology content and convert to a SQLite database using [semsql](https://github.com/INCATools/semantic-sql) or add additional step to query ontologies in [BioPortal](https://bioportal.bioontology.org/). Note, BioPortal does support having private ontologies.
 
-
-## Data File
-The script reads and writes TSV files. The prefixes of the ontologies to be used for the annotation can be added into the config.yml file.
-
-### Input file
-See example input file `conditions_simple.tsv` in `toy_data/raw_data_conditions`.
-
-### Output file
-Example output file: 
-
-```
-condition_source_text	UUID	mondo_result_curie	mondo_result_label	mondo_result_match_type	annotation_source	annotation_method	ontology	alt_names	hpo_result_curie	hpo_result_label	hpo_result_match_type	maxo_result_curie	maxo_result_label	maxo_result_match_type
-ASD	7317c559-ff88-4c31-8608-77615b20b267	MONDO:0006664	atrial septal defect	MONDO_EXACT_ALIAS	oak	exact_synonym	mondo							
-ASD	7317c559-ff88-4c31-8608-77615b20b267				oak	exact_synonym	hp		HP:0000729, HP:0001631	Autistic behavior, Atrial septal defect	HPO_EXACT_ALIAS			
-ASD	7317c559-ff88-4c31-8608-77615b20b267				openai	no_match	maxo	autism spectrum disorder, atrial septal defect, advanced sleep phase disorder, asynchronous serial data, active server directory						
-```
