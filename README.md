@@ -1,7 +1,13 @@
 # OntoAnnotate
-Annotate data to ontology terms.
+Annotate data to ontology terms. This script takes in TSV files with short text snippets and annotates the text with ontology terms. 
+The text can be a few words to a paragraph, additional preprocessing of the text is currently needed before using this tool to chunk the text.
 
-## Prerequisites
+The current version of the script assumes the ontologies to use for annotation exist as a SemSQL database. Future versions will remove this requirement.
+
+## Requirements
+Python
+
+## Create and activate a virtual environment
 The prerequisites to run the script can either be installed using the `requirements.txt` file if using pyenv or `environment.yml` file if using conda.
 
 ### Commands
@@ -11,29 +17,48 @@ The prerequisites to run the script can either be installed using the `requireme
 
  `conda env create -f environment.yml`
 
+## Install in editable mode
+To make the `onto-annotate` command available in your environment from the root of the project directory run:
+`pip install -e .`
+
+Use of the `-e` flag means that any code changes to files in `src/onto_annotate` will take effect immediately without reinstalling.
+
+## Configuration
+Copy the example config and customize it for your project:
+`cp config/config.example.yml config/config.yml`
+
+The YAML file has three keys: `ontologies`, `column_to_annotate`, and `output_dir`. The key `ontologies` should contain the ontology "acronym" as listed on [BioPortal](https://bioportal.bioontology.org/ontologies). The `column_to_annotate` key is the column header name in the input data file that contains the text to annotate. Finally, there is an optional key, `output_dir` if a location other than `data/output` is preferred for the resulting annotated files.
+
+
+## OpenAI API
+The tool has an option to use the OpenAI API to annotate text not otherwise matched to an ontology term. In order to use this feature, create an OpenAI API Key [here](https://platform.openai.com/api-keys) and then add this your environment as:
+`export OPENAI_API_KEY=your-key-here>`
+
 
 ## Usage
-### Python
+Annotate your text files as:
 ```
-python harmonize.py annotate \
-    --config ../config/config.yml \
-    --input_file ../toy_data/raw_data_conditions/conditions_simple.tsv \
-    --output_dir tmp/output/ \
+onto_annotate/run_pipeline.py annotate \
+    --config config/config.yml \
+    --input_file data/demo_data/conditions_simple.tsv \
+    --output_dir data/output/ \
     --refresh \
     --no_openai
 ```
 
-### Make Command
-`make annotate input_file=toy_data/raw_data_conditions/conditions_simple.tsv output_dir=harmonica/tmp/output refresh=true`
-(the `make` command is run from the root of the project)
-
-Optional parameters of `refresh=true` and `use_openai=true` can be added.
- 
 NOTES:
 1. Include `-vv` before `annotate` to generate debug output.
 1. `--output_dir` is optional; it can be defined in the YAML config instead.
 1. `--refresh` flag to update the cached OAK ontology database. To rely on the existing local copy, leave out `--refresh` or `refresh=true`.
 1. `--use_openai` flag to skip LLM-based annotation, if true search with LLM approaches are used. The default is false.
+
+
+### Optional Make Command
+`make annotate input_file=toy_data/raw_data_conditions/conditions_simple.tsv output_dir=harmonica/tmp/output refresh=true`
+(the `make` command is run from the root of the project)
+
+Optional parameters of `refresh=true` and `use_openai=true` can be added.
+TODO: Update based on new repo structure.
 
 
 ## Ontology SQLite Database
@@ -53,14 +78,6 @@ OAK references:
 
 TODO: Include other methods to download ontology content and convert to a SQLite database using [semsql](https://github.com/INCATools/semantic-sql) or add additional step to query ontologies in [BioPortal](https://bioportal.bioontology.org/). Note, BioPortal does support having private ontologies.
 
-
-## Configuration
-Copy the example config and customize it for your project:
-`cp config/config.example.yml config/config.yml`
-
-## OpenAI API
-Create an OpenAI API Key [here](https://platform.openai.com/api-keys) and then add this your environment as: 
-`export OPENAI_API_KEY=your-key-here>`
 
 ## Data File
 The script reads and writes TSV files. The prefixes of the ontologies to be used for the annotation can be added into the config.yml file.
