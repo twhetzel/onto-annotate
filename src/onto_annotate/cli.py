@@ -33,7 +33,7 @@ for handler in logging.root.handlers[:]:
     logging.root.removeHandler(handler)
 
 # Configure logger
-logger = logging.getLogger("harmonica")
+logger = logging.getLogger("cli")
 
 # logging.basicConfig(
 #     level=logging.DEBUG,
@@ -350,7 +350,7 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
     """
     Annotate a data file with ontology terms.
     :param config: Path to the config file.
-    :param data_filename: The name of the file with terms to search for ontology matches.
+    :param input_file: The name of the file with terms to search for ontology matches.
     """
 
     config_data = load_config(config)
@@ -488,7 +488,32 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
     # === Exit if no results  ===
     if not all_final_results:
         logger.warning("No annotation results found for any ontology.")
+        # Always write a TSV with expected columns even when there are no matches
+        final_df = data_df.copy()
+
+        # Ensure string type (avoid NaNs becoming 'nan' later)
+        for c in final_df.columns:
+            final_df[c] = final_df[c].astype(str)
+
+        # Add empty result columns for each requested ontology
+        for oid_single in oid:  # e.g., ('mondo',) or ('mondo','hp')
+            prefix = 'hpo' if oid_single.lower() == 'hp' else oid_single.lower()
+            for col in (
+                f"{prefix}_result_curie",
+                f"{prefix}_result_label",
+                f"{prefix}_result_match_type",
+            ):
+                if col not in final_df.columns:
+                    final_df[col] = ""
+
+        final_df = final_df.fillna("")
+
+        output_path = Path(output_dir) / f"{filename_prefix}-combined_ontology_annotations-{formatted_timestamp}.tsv"
+        final_df.to_csv(output_path, sep="\t", index=False)
+
+        print(f"\nAnnotation results written to: {output_path}")
         return
+
 
     # === Combine all results ===
     full_results = pd.concat(all_final_results, ignore_index=True)
