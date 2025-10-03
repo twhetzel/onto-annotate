@@ -1,7 +1,13 @@
 # OntoAnnotate
-Annotate data to ontology terms.
+Annotate data to ontology terms. This script takes in TSV files with short text snippets and annotates the text with ontology terms. 
+The text can be a few words to a paragraph, additional preprocessing of the text is currently needed before using this tool to chunk the text.
 
-## Prerequisites
+The current version of the script assumes the ontologies to use for annotation exist as a SemSQL database. Future versions will remove this requirement.
+
+## Requirements
+Python
+
+## Create and activate a virtual environment
 The prerequisites to run the script can either be installed using the `requirements.txt` file if using pyenv or `environment.yml` file if using conda.
 
 ### Commands
@@ -11,15 +17,35 @@ The prerequisites to run the script can either be installed using the `requireme
 
  `conda env create -f environment.yml`
 
+## Install in editable mode
+To make the `onto-annotate` command available in your environment from the root of the project directory run:
+`pip install -e .`
+
+Use of the `-e` flag means that any code changes to files in `src/onto_annotate` will take effect immediately without reinstalling.
+
+## Configuration
+Copy the example config and customize it for your project:
+`cp config/config.example.yml config/config.yml`
+
+The YAML file has three keys: `ontologies`, `column_to_annotate`, and `output_dir`. The key `ontologies` should contain the ontology "acronym" as listed on [BioPortal](https://bioportal.bioontology.org/ontologies). The `column_to_annotate` key is the column header name in the input data file that contains the text to annotate. Finally, there is an optional key, `output_dir` if a location other than `data/output` is preferred for the resulting annotated files.
+
+
+## OpenAI API
+The tool has an option to use the OpenAI API to annotate text not otherwise matched to an ontology term. In order to use this feature, create an OpenAI API Key [here](https://platform.openai.com/api-keys) and then add this your environment as:
+`export OPENAI_API_KEY=your-key-here>`
+
 
 ## Usage
-### Python
+Annotate your text files as:
 ```
-python src/harmonize.py annotate \
+onto_annotate/run_pipeline.py annotate \
     --config config/config.yml \
-    --input_file data/input/TEST/conditions_simple.tsv \
-    --output_dir tmp/output/
+    --input_file data/demo_data/conditions_simple.tsv \
+    --output_dir data/output/ \
+    --refresh \
+    --no_openai
 ```
+
 NOTES:
 1. Include `-vv` before `annotate` to generate debug output.
 1. `--output_dir` is optional; it can be defined in the YAML config instead.
@@ -27,11 +53,13 @@ NOTES:
 1. `--use_openai` flag to skip LLM-based annotation, if true search with LLM approaches are used. The default is false.
 
 
-### Make
-`make annotate input_file=data/input/TEST/conditions_simple.tsv output_dir=tmp/output`
+### Optional Make Command
+`make annotate input_file=toy_data/raw_data_conditions/conditions_simple.tsv output_dir=harmonica/tmp/output refresh=true`
+(the `make` command is run from the root of the project)
 
 Optional parameters of `refresh=true` and `use_openai=true` can be added.
- 
+TODO: Update based on new repo structure.
+
 
 ## Ontology SQLite Database
 Using `get_adapter(f"sqlite:obo:{ontology_id}")` the ontology database is saved at `~/.data/oaklib/`.
@@ -48,48 +76,21 @@ OAK references:
 - Cache control - https://incatools.github.io/ontology-access-kit/cli.html#cache-control
 
 
-TODO: Include other methods to download ontology content and convert to a SQLite database using [semsql](https://github.com/INCATools/semantic-sql).
+TODO: Include other methods to download ontology content and convert to a SQLite database using [semsql](https://github.com/INCATools/semantic-sql) or add additional step to query ontologies in [BioPortal](https://bioportal.bioontology.org/). Note, BioPortal does support having private ontologies.
 
-
-## Configuration
-
-Copy the example config and customize it for your project:
-`cp config/config.example.yml config/config.yml`
-
-## OpenAI API
-Create an OpenAI API Key [here](https://platform.openai.com/api-keys) and then add this your environment as: 
-`export OPENAI_API_KEY=your-key-here>`
 
 ## Data File
-Currently, the script assumes that the data file is an Excel file that has ~~one sheet~~ multiple sheets (TODO: paramterize Sheet name) and that the column with terms to search for matches to an ontology are in the first column.
+The script reads and writes TSV files. The prefixes of the ontologies to be used for the annotation can be added into the config.yml file.
 
-TODO: Consider whether the input data file formatting assumptions need to be paramterized in the code to handle other varieties of files, e.g. CSV or Excel files where the search data is in another sheet or the first sheet but another column.
+### Input file
+See example input file `conditions_simple.tsv` in `toy_data/raw_data_conditions`.
 
-The input data file is expected to be stored locally at `data/input/` and the results of the ontology harmonization are stored at `data/ouput/`.
+### Output file
+Example output file: 
 
-## Other files
-- `compare_oak2rdflib.py` - added to check that all classes obtained used rdflib are also found in the semsql database. This was created because there was a confusion about which Mondo version was downloaded and a difference was seen between the content of the semsql database and rdflib using the latest Mondo release. It turns out the semsql database had not been updated when testing to provide the latest release of Mondo.
-
-`rdflib_test.py` - extract classes from Mondo using rdflib
-
-
-## Further Investigation
-Review these items later to see if they can be done with OAK.
-
-### Sort out if/how other parameters work for OAK Search
- # Configure the search -- KEEP!
-    # config = SearchConfiguration(syntax=SearchTermSyntax.STARTS_WITH) # Example from: https://github.com/INCATools/ontology-access-kit/blob/main/notebooks/Developers-Tutorial.ipynb
-
-    # Configure the search -- KEEP!
-    # config = SearchConfiguration(
-    # TODO: Find out how to use object_source to limit results to an ontology as well as 
-    # object_source_match and snippet from SearchResult. 
-    # See https://incatools.github.io/ontology-access-kit/datamodels/search/ and 
-    # https://incatools.github.io/ontology-access-kit/datamodels/search/SearchResult.html 
-    #     # properties=[SearchProperty.ALIAS], # matches to label and synonyms
-    #     properties=[SearchProperty.LABEL], #matches label only
-    #     force_case_insensitive=True,
-    #     # is_complete=True,
-    #     # is_partial=True, # does not seem to work even with single token label, e.g. ureteroc MONDO:0008628
-    #     # is_fuzzy=True, # does not seem to work for fuzzy match to labels (ureteroc MONDO:0008628) or synonyms (intertricular commcation MONDO:0002070)
-    # )
+```
+condition_source_text	UUID	mondo_result_curie	mondo_result_label	mondo_result_match_type	annotation_source	annotation_method	ontology	alt_names	hpo_result_curie	hpo_result_label	hpo_result_match_type	maxo_result_curie	maxo_result_label	maxo_result_match_type
+ASD	7317c559-ff88-4c31-8608-77615b20b267	MONDO:0006664	atrial septal defect	MONDO_EXACT_ALIAS	oak	exact_synonym	mondo							
+ASD	7317c559-ff88-4c31-8608-77615b20b267				oak	exact_synonym	hp		HP:0000729, HP:0001631	Autistic behavior, Atrial septal defect	HPO_EXACT_ALIAS			
+ASD	7317c559-ff88-4c31-8608-77615b20b267				openai	no_match	maxo	autism spectrum disorder, atrial septal defect, advanced sleep phase disorder, asynchronous serial data, active server directory						
+```
