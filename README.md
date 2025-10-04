@@ -36,20 +36,20 @@ The tool has an option to use the OpenAI API to annotate text not otherwise matc
 
 
 ## Usage
-Annotate your text files as:
+Annotate your text files (without AI assistance) as:
 ```
 onto-annotate annotate \
     --config config/config.yml \
     --input_file data/demo_data/conditions_simple.tsv \
     --output_dir data/output \
-    --no_openai
+    --no_openai  # Remove this flag to annotate with AI assistance
 ```
 
 NOTES:
-1. Include `-vv` before `annotate` to generate debug output.
-1. `--output_dir` is optional; it can be defined in the YAML config instead.
+1. `--no_openai` - this is a boolean flag to skip LLM-based annotation. To use OpenAI simply do not add this flag and remember to set your OPENAI_API_KEY as described above.
 1. `--refresh` flag to update the cached OAK ontology database. To rely on the existing local copy, leave out `--refresh` or `refresh=true`.
-1. `--no_openai` flag to skip LLM-based annotation. To use OpenAI do not add this flag and remember to set your OPENAI_API_KEY as described above.
+1. `--output_dir` is optional; it can be defined in the YAML config instead.
+1. Use `-vv` before `annotate` to generate debug output.
 
 
 ## Data File
