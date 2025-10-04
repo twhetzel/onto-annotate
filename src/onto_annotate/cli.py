@@ -10,6 +10,8 @@ from oaklib.implementations.sqldb.sql_implementation import SqlImplementation
 import pandas as pd
 import numpy as np
 from pathlib import Path
+from importlib.resources import files, as_file
+from typing import Optional, Dict
 from tqdm import tqdm
 import sys
 import yaml
@@ -19,6 +21,9 @@ import openai
 import json
 import re
 
+
+DEMO_PREFIX = "demo:"
+DEMO_BASE = "demo_data"
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -82,6 +87,32 @@ def main(verbose: int, quiet: bool):
         logger.setLevel(level=logging.WARNING)
     if quiet:
         logger.setLevel(level=logging.ERROR)
+
+
+def resolve_input_path(input_arg: str) -> Path:
+    """
+    Returns a real filesystem Path for both normal files and packaged demo files.
+    - "path/to/file.tsv"
+    - "demo:<name>" the packaged sample from src/onto_annotate/data/demo_data/<name>
+    """
+    if input_arg.startswith(DEMO_PREFIX):
+        name = input_arg[len(DEMO_PREFIX):].lstrip("/")
+        resource = files("onto_annotate").joinpath(f"{DEMO_BASE}/{name}")
+        return as_file(resource).__enter__()
+    return Path(input_arg).expanduser().resolve()
+
+
+def resolve_output_dir(output_dir: Optional[str], config_data: Optional[Dict]) -> Path:
+    """
+    Resolve output directory with priority: CLI -> config -> ./output.
+    Ensures the directory exists.
+    """
+    default = Path.cwd() / "output"
+    chosen = output_dir or (config_data or {}).get("output_dir") or default
+    out = Path(chosen).expanduser().resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
 
 
 def clear_cached_db(ontology_id: str):
@@ -343,8 +374,8 @@ def custom_join(series):
 
 @main.command("annotate")
 @click.option('--config', type=click.Path(exists=True), help='Path to YAML config file')
-@click.option('--input_file', type=click.Path(exists=True), required=True, help="Path to data file to annotate")
-@click.option('--output_dir', type=click.Path(), required=False, help='Optional override for output directory')
+@click.option('--input_file', type=str, required=True, help="Path to data file to annotate (or 'demo:<name>.tsv')")
+@click.option('--output_dir', type=click.Path(), required=False, help='Optional override for output directory (default: ./output)')
 @click.option('--refresh', is_flag=True, help='Force refresh of ontology cache')
 @click.option('--no_openai', is_flag=True, help='Disable OpenAI-based fallback searches')
 def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_openai: bool):
@@ -363,8 +394,7 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
         raise click.ClickException("Config file must contain 'ontologies' and 'columns_to_annotate'.")
     
     # Determine output directory from CLI or config or fallback
-    output_dir = Path(output_dir or config_data.get("output_dir", "data/output/")).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = resolve_output_dir(output_dir, config_data)
 
     click.echo(f"Using ontologies: {ontologies}")
     click.echo(f"Annotating columns: {columns}")
@@ -381,9 +411,9 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
     formatted_timestamp = timestamp.strftime("%Y%m%d-%H%M%S")
 
     # Read in the data file
-    file_path = Path(input_file).resolve()
+    input_path = resolve_input_path(input_file)
 
-    data_df = pd.read_csv(file_path, sep='\t')
+    data_df = pd.read_csv(input_path, sep='\t')
     logger.debug(data_df[columns])
     
     # Add a new column 'UUID' with unique identifier values

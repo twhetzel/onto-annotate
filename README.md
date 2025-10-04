@@ -39,10 +39,10 @@ The tool has an option to use the OpenAI API to annotate text not otherwise matc
 Annotate your text files (without AI assistance) as:
 ```
 onto-annotate annotate \
-    --config config/config.yml \
-    --input_file data/demo_data/conditions_simple.tsv \
-    --output_dir data/output \
-    --no_openai  # Remove this flag to annotate with AI assistance
+  --config config/config.yml \
+  --input_file demo:conditions_simple.tsv \
+  --output_dir ./output \
+  --no_openai  # Remove this flag to annotate with AI assistance
 ```
 
 NOTES:
