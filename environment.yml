@@ -9,5 +9,5 @@ dependencies:
   - tqdm
   - pip:
       - click
-      - openai
+      - openai==0.28
       - oaklib

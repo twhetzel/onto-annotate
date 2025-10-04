@@ -31,7 +31,7 @@ class MockAdapter:
         t = (text or "").strip().lower()
         if prop == "LABEL":
             if t == "type 1 diabetes mellitus":
-                return ["MONDO:0005148"]   # must start with 'MONDO'
+                return ["MONDO:0005148"]
         if prop == "ALIAS":
             if t in {"juvenile diabetes", "insulin-dependent diabetes"}:
                 return ["MONDO:0005148"]
@@ -48,7 +48,18 @@ class MockSearchConfiguration:
 
 
 def test_annotate_label_and_alias_flow(tmp_path, monkeypatch):
-    # --- Arrange
+    """End-to-end CLI test: run onto-annotate annotate ... with a TSV + config, using mocks for OAK and OpenAI."""
+   
+    # Imports specific for this test
+    import onto_annotate.cli as cli_mod
+    import onto_annotate.cli as _cli
+
+    import re
+    from pathlib import Path
+
+    import re
+
+   # --- Arrange
     input_tsv = tmp_path / "conditions.tsv"
     _write_tsv(
         input_tsv,
@@ -68,12 +79,10 @@ def test_annotate_label_and_alias_flow(tmp_path, monkeypatch):
     outdir = tmp_path / "out"
 
     # monkeypatch oaklib + SearchConfiguration in module namespace
-    import onto_annotate.cli as cli_mod
     monkeypatch.setattr(cli_mod, "get_adapter", lambda *_args, **_kw: MockAdapter())
     monkeypatch.setattr(cli_mod, "SearchConfiguration", MockSearchConfiguration)
 
-    # Also ensure OpenAI path is not invoked (we pass --no_openai anyway)
-    import onto_annotate.cli as _cli
+    # Also ensure OpenAI path is not invoked (we pass --no_openai)
     if hasattr(_cli, "openai"):
         monkeypatch.setattr(_cli.openai.ChatCompletion, "create",
                             lambda *a, **k: (_ for _ in ()).throw(AssertionError("OpenAI should not be called")),
@@ -92,9 +101,6 @@ def test_annotate_label_and_alias_flow(tmp_path, monkeypatch):
         ],
     )
 
-    import re
-    from pathlib import Path
-
     m = re.search(r"Annotation results written to:\s*(.*\.tsv)", result.output)
     assert m, f"CLI did not report an output TSV path.\nOutput was:\n{result.output}"
     tsv_path = Path(m.group(1))
@@ -105,7 +111,6 @@ def test_annotate_label_and_alias_flow(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
 
     # Parse the written TSV path
-    import re
     m = re.search(r"Annotation results written to:\s*(.*\.tsv)", result.output)
     assert m, f"CLI did not report an output TSV path.\nOutput was:\n{result.output}"
     tsv_path = Path(m.group(1))
@@ -122,7 +127,6 @@ def test_annotate_label_and_alias_flow(tmp_path, monkeypatch):
         assert col in rows[0]
 
     # Because this run hit the "no results" path, allow empty values
-    # (If your mocks later produce hits, this still passes as long as strings are present.)
     for r in rows:
         assert isinstance(r["mondo_result_curie"], str)
         assert isinstance(r["mondo_result_label"], str)

@@ -234,6 +234,7 @@ def clean_json_response(content: str) -> str:
 
 
 def get_alternative_names(term: str) -> dict:
+    """Create a prompt for ChatGPT to ask for alternative names."""
     prompt = (
         f"For the term '{term}', return a JSON object with three keys:\n"
         "- 'input': the original term\n"
