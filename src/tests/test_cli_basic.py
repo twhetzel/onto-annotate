@@ -52,12 +52,8 @@ def test_annotate_label_and_alias_flow(tmp_path, monkeypatch):
    
     # Imports specific for this test
     import onto_annotate.cli as cli_mod
-    import onto_annotate.cli as _cli
-
     import re
     from pathlib import Path
-
-    import re
 
    # --- Arrange
     input_tsv = tmp_path / "conditions.tsv"
