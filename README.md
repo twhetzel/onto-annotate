@@ -49,7 +49,7 @@ NOTES:
 1. Include `-vv` before `annotate` to generate debug output.
 1. `--output_dir` is optional; it can be defined in the YAML config instead.
 1. `--refresh` flag to update the cached OAK ontology database. To rely on the existing local copy, leave out `--refresh` or `refresh=true`.
-1. `--no_openai` flag to skip LLM-based annotation, if true search with LLM approaches are used. The default is false. To use OpenAI do not add this flag and remember to set your OPENAI_API_KEY as described above.
+1. `--no_openai` flag to skip LLM-based annotation. To use OpenAI do not add this flag and remember to set your OPENAI_API_KEY as described above.
 
 
 ## Data File
