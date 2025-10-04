@@ -1,8 +1,8 @@
 # OntoAnnotate
-Annotate data to ontology terms. This script takes in TSV files with short text snippets and annotates the text with ontology terms. 
-The text can be a few words to a paragraph, additional preprocessing of the text is currently needed before using this tool to chunk the text.
+Annotate data to ontology terms. This script takes in a TSV file with short text snippets and annotates the text with ontology terms. 
+The text can be a few words to a paragraph (see example input files in `data/demo_data`), additional preprocessing of the text is currently needed before using this tool to chunk the text.
 
-The current version of the script assumes the ontologies to use for annotation exist as a SemSQL database. Future versions will remove this requirement.
+The current version of the script assumes the ontologies to use for annotation exist as a [SemSQL](https://github.com/incatools/semantic-sql) database. Future versions will remove this requirement.
 
 ## Requirements
 Python
@@ -32,32 +32,31 @@ The YAML file has three keys: `ontologies`, `column_to_annotate`, and `output_di
 
 ## OpenAI API
 The tool has an option to use the OpenAI API to annotate text not otherwise matched to an ontology term. In order to use this feature, create an OpenAI API Key [here](https://platform.openai.com/api-keys) and then add this your environment as:
-`export OPENAI_API_KEY=your-key-here>`
+`export OPENAI_API_KEY=<YOUR-API-KEY>`
 
 
 ## Usage
-Annotate your text files as:
+Annotate your text files (without AI assistance) as:
 ```
 onto-annotate annotate \
     --config config/config.yml \
     --input_file data/demo_data/conditions_simple.tsv \
     --output_dir data/output \
-    --no_openai
+    --no_openai  # Remove this flag to annotate with AI assistance
 ```
 
-
 NOTES:
-1. Include `-vv` before `annotate` to generate debug output.
-1. `--output_dir` is optional; it can be defined in the YAML config instead.
+1. `--no_openai` - this is a boolean flag to skip LLM-based annotation. To use OpenAI simply do not add this flag and remember to set your OPENAI_API_KEY as described above.
 1. `--refresh` flag to update the cached OAK ontology database. To rely on the existing local copy, leave out `--refresh` or `refresh=true`.
-1. `--use_openai` flag to skip LLM-based annotation, if true search with LLM approaches are used. The default is false.
+1. `--output_dir` is optional; it can be defined in the YAML config instead.
+1. Use `-vv` before `annotate` to generate debug output.
 
 
 ## Data File
 The script reads and writes TSV files. The prefixes of the ontologies to be used for the annotation can be added into the config.yml file.
 
 ### Input file
-See example input file `conditions_simple.tsv` in `toy_data/raw_data_conditions`.
+See example input file `conditions_simple.tsv` in `data/demo_data`.
 
 ### Output file
 Example output file: 
