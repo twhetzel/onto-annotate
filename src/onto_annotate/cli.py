@@ -20,6 +20,8 @@ import os
 import openai
 import json
 import re
+import io
+from contextlib import contextmanager
 
 
 DEMO_PREFIX = "demo:"
@@ -114,6 +116,28 @@ def resolve_output_dir(output_dir: Optional[str], config_data: Optional[Dict]) -
     return out
 
 
+@contextmanager
+def open_input(input_arg: str, encoding: str = "utf-8"):
+    """
+    Yields a readable text file object for both normal files and packaged demos.
+
+    Usage:
+        with open_input(arg) as f:
+            df = pd.read_csv(f, sep="\t")
+    """
+    if isinstance(input_arg, str) and input_arg.startswith(DEMO_PREFIX):
+        name = input_arg[len(DEMO_PREFIX):].lstrip("/")
+        resource = files("onto_annotate").joinpath(f"{DEMO_BASE}/{name}")
+        # Open the resource as bytes, wrap with TextIO so pandas sees text
+        with resource.open("rb") as bio:
+            with io.TextIOWrapper(bio, encoding=encoding, newline="") as tio:
+                yield tio
+    else:
+        # Normal filesystem path
+        with open(Path(input_arg).expanduser().resolve(), "r", encoding=encoding, newline="") as f:
+            yield f
+
+
 
 def clear_cached_db(ontology_id: str):
     """Clear ontology database files (.db and .db.gz) cached by OAK."""
@@ -161,10 +185,12 @@ def fetch_ontology(ontology_id: str, refresh: bool = False) -> SqlImplementation
 
 
 
-
 def load_config(config_path):
+    """
+    Load YAML config from either a normal path or a packaged demo (demo:config.yml).
+    """
     try:
-        with open(config_path, 'r') as f:
+        with open_input(config_path) as f:
             config = yaml.safe_load(f)
     except Exception as e:
         click.echo(f"Error reading config file: {e}", err=True)
@@ -413,7 +439,9 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
     # Read in the data file
     input_path = resolve_input_path(input_file)
 
-    data_df = pd.read_csv(input_path, sep='\t')
+    # data_df = pd.read_csv(input_path, sep='\t')
+    with open_input(input_file) as fh:
+        data_df = pd.read_csv(fh, sep="\t")
     logger.debug(data_df[columns])
     
     # Add a new column 'UUID' with unique identifier values
