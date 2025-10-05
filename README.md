@@ -12,10 +12,14 @@ The prerequisites to run the script can either be installed using the `requireme
 
 ### Commands
 `pip install -r requirements.txt`
- 
- Or
+Followed by: 
+`python -m venv .venv && source .venv/bin/activate`
 
- `conda env create -f environment.yml`
+** OR **
+
+`conda env create -f environment.yml`
+Followed by:
+`conda activate onto-annotate`
 
 ## Install in editable mode
 To make the `onto-annotate` command available in your environment from the root of the project directory run:
