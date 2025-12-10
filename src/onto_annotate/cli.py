@@ -979,6 +979,12 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
         
         bioportal_hits_df = pd.concat(bioportal_hits, ignore_index=True) if bioportal_hits else pd.DataFrame()
         
+        # Keep only the last search method's results (even if no_match)
+        # If BioPortal is enabled, it's the last search, so remove all OpenAI no_match rows
+        if bioportal_config.get("enabled", False) and not openai_hits_df.empty:
+            # Remove all OpenAI no_match rows since BioPortal is the last search method
+            openai_hits_df = openai_hits_df[openai_hits_df["annotation_method"] != "no_match"]
+        
         results_sources = [label_hits_df, synonym_hits_df]
         if not openai_hits_df.empty:
             results_sources.append(openai_hits_df)
