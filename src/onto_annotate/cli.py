@@ -17,7 +17,7 @@ import sys
 import yaml
 from pathlib import Path
 import os
-import openai
+from openai import OpenAI
 import json
 import re
 import io
@@ -26,8 +26,6 @@ from contextlib import contextmanager
 
 DEMO_PREFIX = "demo:"
 DEMO_BASE = "demo_data"
-
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
 __all__ = [
@@ -311,15 +309,15 @@ def get_alternative_names(term: str) -> dict:
         "}"
     )
 
-
     try:
-        response = openai.ChatCompletion.create(
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5,
             max_tokens=150,
         )
-        content = response['choices'][0]['message']['content']
+        content = response.choices[0].message.content
         cleaned = clean_json_response(content)
         result = json.loads(cleaned)
         return result
