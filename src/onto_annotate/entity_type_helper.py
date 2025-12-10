@@ -11,6 +11,12 @@ logger = logging.getLogger(__name__)
 
 OBO_FOUNDRY_URL = "https://obofoundry.org/registry/ontologies.jsonld"
 
+# Valid entity type tags from OBO Foundry metadata
+VALID_ENTITY_TYPE_TAGS = {
+    "disease", "phenotype", "symptom", "condition", "disorder",
+    "syndrome", "trait", "procedure", "test"
+}
+
 # Domain to entity type mappings
 DOMAIN_TO_ENTITY_TYPES = {
     "health": ["disease", "condition", "disorder", "syndrome"],
@@ -111,8 +117,7 @@ def suggest_entity_types(ontology_id: str, obo_data: Optional[Dict] = None) -> L
     for tag in tags:
         tag_lower = str(tag).lower()
         # Add tag itself if it's a meaningful entity type
-        if tag_lower in ["disease", "phenotype", "symptom", "condition", "disorder", 
-                         "syndrome", "trait", "procedure", "test"]:
+        if tag_lower in VALID_ENTITY_TYPE_TAGS:
             if tag_lower not in suggested_types:
                 suggested_types.append(tag_lower)
     

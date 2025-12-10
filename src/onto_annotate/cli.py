@@ -39,6 +39,17 @@ DEMO_BASE = "demo_data"
 # BioPortal search cache: (term, ontology_acronyms_tuple, api_key) -> result
 _bioportal_cache: Dict[tuple, Optional[Dict]] = {}
 
+# OpenAI client singleton (lazily initialized)
+_openai_client: Optional[OpenAI] = None
+
+
+def get_openai_client() -> OpenAI:
+    """Get or create a singleton OpenAI client instance."""
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    return _openai_client
+
 
 __all__ = [
     "main",
@@ -699,7 +710,7 @@ def get_alternative_names(term: str) -> dict:
     )
 
     try:
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = get_openai_client()
         response = client.responses.create(
             model="gpt-4.1",
             input=prompt,
@@ -754,7 +765,7 @@ def detect_entities_by_type(text: str, entity_types: list[str]) -> list[dict]:
     )
     
     try:
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = get_openai_client()
         response = client.responses.create(
             model="gpt-4.1",
             input=prompt,
