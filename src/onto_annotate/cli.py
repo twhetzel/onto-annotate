@@ -312,7 +312,7 @@ def get_alternative_names(term: str) -> dict:
     try:
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.1",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.5,
             max_tokens=150,
