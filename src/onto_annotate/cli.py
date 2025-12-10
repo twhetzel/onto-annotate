@@ -440,7 +440,7 @@ def clean_json_response(content: str) -> str:
     Clean common formatting issues in GPT output before JSON parsing.
     """
     # Replace smart quotes with standard quotes
-    content = content.replace(""", "\"").replace(""", "\"").replace("'", "'").replace("'", "'")
+    content = content.replace("\u201C", "\"").replace("\u201D", "\"").replace("\u2018", "'").replace("\u2019", "'")
 
     # Strip any leading junk like ```json ... ```
     content = re.sub(r"^```(json)?\s*", "", content.strip())
