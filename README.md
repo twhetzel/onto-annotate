@@ -31,12 +31,35 @@ Use of the `-e` flag means that any code changes to files in `src/onto_annotate`
 Copy the example config and customize it for your project:
 `cp config/config.example.yml config/config.yml`
 
-The YAML file has three keys: `ontologies`, `column_to_annotate`, and `output_dir`. The key `ontologies` should contain the ontology "acronym" as listed on [BioPortal](https://bioportal.bioontology.org/ontologies). The `column_to_annotate` key is the column header name in the input data file that contains the text to annotate. Finally, there is an optional key, `output_dir` if a location other than `data/output` is preferred for the resulting annotated files.
+The YAML file has the following keys:
+- `ontologies`: List of ontology acronyms (as listed on [BioPortal](https://bioportal.bioontology.org/ontologies)) to search using OAK
+- `columns_to_annotate`: List of column header names in the input data file that contain the text to annotate
+- `output_dir`: (Optional) Output directory for annotated files (default: `data/output`)
+- `bioportal`: (Optional) Dictionary for BioPortal fallback search configuration:
+  - `enabled` (boolean): Enable/disable BioPortal search
+  - `ontologies` (list): List of ontology acronyms to search in BioPortal (searched in priority order)
+  
+  **Note:** Set `BIOPORTAL_API_KEY` environment variable to use this feature
 
 
 ## OpenAI API
 The tool has an option to use the OpenAI API to annotate text not otherwise matched to an ontology term. In order to use this feature, create an OpenAI API Key [here](https://platform.openai.com/api-keys) and then add this your environment as:
 `export OPENAI_API_KEY=<YOUR-API-KEY>`
+
+## BioPortal API
+The tool has an optional BioPortal fallback search that runs after OAK and OpenAI searches fail. BioPortal searches for exact matches on preferred labels first, then synonyms if no exact match is found. To use this feature:
+
+1. Create a BioPortal account and obtain an API key from [BioPortal](https://bioportal.bioontology.org/)
+2. Set the API key as an environment variable: `export BIOPORTAL_API_KEY=<YOUR-API-KEY>`
+3. Enable BioPortal in your config file and specify which ontologies to search:
+   ```yaml
+   bioportal:
+     enabled: true
+     ontologies:
+       - ICD10CM
+       - SNOMEDCT
+       # Searched in priority order until match found
+   ```
 
 
 ## Usage

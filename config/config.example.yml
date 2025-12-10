@@ -6,3 +6,14 @@ columns_to_annotate:
 
 # Optional output directory
 output_dir: data/output/
+
+# Optional BioPortal fallback search
+# BioPortal searches the ontologies listed below, first for exact prefLabel matches,
+# then for synonyms if no exact match is found. Searched in priority order.
+# Set BIOPORTAL_API_KEY environment variable to use this feature.
+bioportal:
+  enabled: false
+  ontologies:
+    - ONTOLOGY_ACRONYM_1
+    - ONTOLOGY_ACRONYM_2
+    # Searched in order until match found
