@@ -7,6 +7,19 @@ columns_to_annotate:
 # Optional output directory
 output_dir: data/output/
 
+# Optional LLM entity-type detector
+# Extracts entities of specific types from unmatched text before BioPortal search.
+# Entity types can be user-defined or auto-derived from OBO Foundry metadata.
+# Run 'onto-annotate suggest-entity-types --ontology MONDO' to get suggestions.
+# Set OPENAI_API_KEY environment variable to use this feature.
+entity_type_detector:
+  enabled: false
+  # User-defined entity types (ontology ID -> list of entity types)
+  entity_types:
+    MONDO: ["disease", "condition", "disorder"]
+    HP: ["phenotype", "symptom", "clinical feature"]
+  # If entity_types is not provided, types will be auto-derived from OBO Foundry
+
 # Optional BioPortal fallback search
 # BioPortal searches the ontologies listed below, first for exact prefLabel matches,
 # then for synonyms if no exact match is found. Searched in priority order.

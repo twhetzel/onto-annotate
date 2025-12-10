@@ -30,6 +30,7 @@ import re
 import io
 from contextlib import contextmanager
 import requests
+from onto_annotate.entity_type_helper import suggest_entity_types_for_multiple, suggest_entity_types
 
 
 DEMO_PREFIX = "demo:"
@@ -235,6 +236,28 @@ def load_config(config_path):
             if not isinstance(bioportal["ontologies"], list) or not all(isinstance(o, str) for o in bioportal["ontologies"]):
                 click.echo("Config error: 'bioportal.ontologies' should be a list of strings", err=True)
                 sys.exit(1)
+
+    # Validate entity_type_detector config if present
+    if "entity_type_detector" in config:
+        etd = config["entity_type_detector"]
+        if not isinstance(etd, dict):
+            click.echo("Config error: 'entity_type_detector' should be a dictionary", err=True)
+            sys.exit(1)
+        
+        if "enabled" in etd and not isinstance(etd["enabled"], bool):
+            click.echo("Config error: 'entity_type_detector.enabled' should be a boolean", err=True)
+            sys.exit(1)
+        
+        if "entity_types" in etd:
+            if not isinstance(etd["entity_types"], dict):
+                click.echo("Config error: 'entity_type_detector.entity_types' should be a dictionary", err=True)
+                sys.exit(1)
+            
+            # Validate that entity_types values are lists of strings
+            for ont_id, types_list in etd["entity_types"].items():
+                if not isinstance(types_list, list) or not all(isinstance(t, str) for t in types_list):
+                    click.echo(f"Config error: 'entity_type_detector.entity_types.{ont_id}' should be a list of strings", err=True)
+                    sys.exit(1)
 
     return config
 
@@ -648,6 +671,72 @@ def get_alternative_names(term: str) -> dict:
         return []
 
 
+def detect_entities_by_type(text: str, entity_types: list[str]) -> list[dict]:
+    """
+    Use LLM to detect entities of specific types in text.
+    
+    Args:
+        text: Text to analyze
+        entity_types: List of entity types to search for (e.g., ["disease", "condition"])
+        
+    Returns:
+        List of dictionaries with 'span' and 'label' keys for each detected entity
+    """
+    if not entity_types:
+        return []
+    
+    # Create prompt for entity detection
+    entity_types_str = ", ".join(entity_types)
+    prompt = (
+        f"Given the following text, are there any entities of type {entity_types_str}? "
+        f"Return a JSON object with a list of entities found. "
+        f"Each entity should have 'span' (the exact text span from the input) and 'label' (the entity name).\n\n"
+        f"Text: {text}\n\n"
+        f"Return format:\n"
+        "{\n"
+        '  "entities": [\n'
+        '    {"span": "text span", "label": "entity name"},\n'
+        '    {"span": "another span", "label": "another entity"}\n'
+        "  ]\n"
+        "}"
+    )
+    
+    try:
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.responses.create(
+            model="gpt-4.1",
+            input=prompt,
+            temperature=0.3,
+            max_output_tokens=300,
+        )
+        content = response.output_text
+        cleaned = clean_json_response(content)
+        result = json.loads(cleaned)
+        
+        # Extract entities list
+        entities = result.get("entities", [])
+        if not isinstance(entities, list):
+            return []
+        
+        # Validate and return entities
+        valid_entities = []
+        for entity in entities:
+            if isinstance(entity, dict) and "span" in entity and "label" in entity:
+                valid_entities.append({
+                    "span": str(entity["span"]),
+                    "label": str(entity["label"])
+                })
+        
+        return valid_entities
+        
+    except json.JSONDecodeError as e:
+        logger.debug(f"Could not parse JSON from entity detection: {content if 'content' in locals() else 'N/A'}")
+        return []
+    except Exception as e:
+        logger.debug(f"Error detecting entities in text: {e}")
+        return []
+
+
 def generate_uuid() -> str:
     """Function to generate UUID"""
     return str(uuid.uuid4())
@@ -713,6 +802,44 @@ def custom_join(series):
     unique_vals = list(dict.fromkeys(non_empty))
     return ', '.join(unique_vals) if unique_vals else ''
 
+
+@main.command("suggest-entity-types")
+@click.option('--ontology', multiple=True, required=True, help='Ontology ID (e.g., MONDO, HP). Can be specified multiple times.')
+@click.option('--output', type=click.Path(), required=False, help='Optional output file path (JSON or YAML). If not specified, prints to stdout.')
+def suggest_entity_types_cmd(ontology, output):
+    """
+    Suggest entity types for ontologies based on OBO Foundry metadata.
+    """
+    from onto_annotate.entity_type_helper import suggest_entity_types_for_multiple
+    
+    ontology_list = list(ontology)
+    click.echo(f"Fetching entity type suggestions for: {', '.join(ontology_list)}")
+    
+    results = suggest_entity_types_for_multiple(ontology_list)
+    
+    # Format output
+    if output:
+        output_path = Path(output)
+        if output_path.suffix.lower() in ['.yaml', '.yml']:
+            with open(output_path, 'w') as f:
+                yaml.dump(results, f, default_flow_style=False, sort_keys=True)
+            click.echo(f"Entity type suggestions written to: {output_path}")
+        else:
+            # Default to JSON
+            with open(output_path, 'w') as f:
+                json.dump(results, f, indent=2)
+            click.echo(f"Entity type suggestions written to: {output_path}")
+    else:
+        # Print to stdout
+        click.echo("\nSuggested entity types:")
+        click.echo("=" * 50)
+        for ont_id, entity_types in sorted(results.items()):
+            if entity_types:
+                click.echo(f"\n{ont_id}:")
+                for et in entity_types:
+                    click.echo(f"  - {et}")
+            else:
+                click.echo(f"\n{ont_id}: (no suggestions available)")
 
 
 @main.command("annotate")
@@ -927,6 +1054,132 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
             )
             matched_uuids_all |= matched_uuids_openai
         
+        # === LLM Entity-Type Detector ===
+        entity_detector_hits = []
+        etd_config = config_data.get("entity_type_detector", {})
+        if etd_config.get("enabled", False) and not no_openai:
+            # Get entity types for this ontology
+            entity_types = None
+            if "entity_types" in etd_config:
+                # User-defined entity types
+                entity_types = etd_config["entity_types"].get(ontology_id.upper(), [])
+            
+            # If not user-defined, try to derive from OBO Foundry
+            if not entity_types:
+                entity_types = suggest_entity_types(ontology_id)
+            
+            if entity_types:
+                # Get unmatched texts after OAK + OpenAI
+                unmatched_df = data_df[~data_df["UUID"].isin(matched_uuids_all)]
+                
+                if not unmatched_df.empty:
+                    # Collect all entity detection data
+                    all_entity_data = []  # List of dicts: {uuid, original_text, entity_span, entity_label, entity_type}
+                    
+                    for _, row in tqdm(unmatched_df.iterrows(), total=len(unmatched_df), 
+                                      desc=f"Entity type detection ({ontology_id})",
+                                      bar_format='{desc}: [{bar}] {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
+                                      ascii=' #',
+                                      ncols=80):
+                        text = row[columns[0]]
+                        if pd.isna(text):
+                            continue
+                        
+                        # Normalize the text (same as OpenAI step)
+                        match = re.match(r"^(.*?)\s*\((\w{3,5})\)$", str(text).strip())
+                        normalized_text = match.group(1).strip() if match else str(text).strip()
+                        
+                        # Detect entities
+                        detected_entities = detect_entities_by_type(normalized_text, entity_types)
+                        
+                        if detected_entities:
+                            uuid = row["UUID"]
+                            for entity in detected_entities:
+                                # Determine which entity type this matches (if multiple types provided)
+                                entity_type_used = None
+                                entity_label_lower = entity["label"].lower()
+                                for et in entity_types:
+                                    if et.lower() in entity_label_lower or entity_label_lower in et.lower():
+                                        entity_type_used = et
+                                        break
+                                if not entity_type_used and entity_types:
+                                    entity_type_used = entity_types[0]  # Default to first type
+                                
+                                all_entity_data.append({
+                                    "uuid": uuid,
+                                    "original_text": normalized_text,
+                                    "entity_span": entity["span"],
+                                    "entity_label": entity["label"],
+                                    "entity_type": entity_type_used
+                                })
+                    
+                    # Batch search all detected entities through OAK
+                    if all_entity_data:
+                        num_entities = len(all_entity_data)
+                        num_original_texts = len(set(item["uuid"] for item in all_entity_data))
+                        print(f"\n🔍 Searching {num_entities} LLM-detected entities (from {num_original_texts} texts) against OAK {ontology_id.upper()}...")
+                        
+                        # Create dataframe for batch OAK search
+                        entity_search_df = pd.DataFrame([
+                            {"UUID": item["uuid"], columns[0]: item["entity_label"]}
+                            for item in all_entity_data
+                        ])
+                        
+                        # Single OAK search for all detected entities
+                        entity_matches_df = search_ontology(
+                            ontology_id,
+                            adapter,
+                            entity_search_df,
+                            columns,
+                            combined_config,
+                            desc=f"OAK {ontology_id} (entity detection)"
+                        )
+                        
+                        # Process matches and map back to original texts
+                        matched_entity_uuids = set()
+                        
+                        if not entity_matches_df.empty:
+                            for _, match_row in entity_matches_df.iterrows():
+                                match_uuid = match_row["UUID"]
+                                
+                                # Skip if we already have a match for this UUID
+                                if match_uuid in matched_entity_uuids:
+                                    continue
+                                
+                                # Find the original entity data
+                                original_entity_data = None
+                                for item in all_entity_data:
+                                    if item["uuid"] == match_uuid:
+                                        original_entity_data = item
+                                        break
+                                
+                                if original_entity_data:
+                                    # Tag the match
+                                    match_dict = match_row.to_dict()
+                                    match_type = match_dict.get(f'{ontology_prefix}_result_match_type', '')
+                                    
+                                    match_dict["annotation_source"] = "llm_entity_detector"
+                                    match_dict["annotation_method"] = "entity_type_extraction"
+                                    match_dict["entity_type"] = original_entity_data.get("entity_type", "")
+                                    match_dict["original_text"] = original_entity_data["original_text"]
+                                    match_dict["detected_span"] = original_entity_data["entity_span"]
+                                    match_dict["ontology"] = ontology_id.lower()
+                                    
+                                    # Create a single-row dataframe for this match
+                                    match_df = pd.DataFrame([match_dict])
+                                    entity_detector_hits.append(match_df)
+                                    matched_entity_uuids.add(match_uuid)
+                        
+                        # Update matched UUIDs
+                        matched_uuids_all |= matched_entity_uuids
+        
+        entity_detector_hits_df = pd.concat(entity_detector_hits, ignore_index=True) if entity_detector_hits else pd.DataFrame()
+        
+        # Update matched UUIDs after entity detection
+        if not entity_detector_hits_df.empty:
+            matched_uuids_entity = set(entity_detector_hits_df["UUID"].dropna())
+            matched_uuids_all |= matched_uuids_entity
+        
         # === BioPortal fallback search ===
         bioportal_hits = []
         bioportal_config = config_data.get("bioportal", {})
@@ -988,6 +1241,8 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
         results_sources = [label_hits_df, synonym_hits_df]
         if not openai_hits_df.empty:
             results_sources.append(openai_hits_df)
+        if not entity_detector_hits_df.empty:
+            results_sources.append(entity_detector_hits_df)
         if not bioportal_hits_df.empty:
             results_sources.append(bioportal_hits_df)
 
