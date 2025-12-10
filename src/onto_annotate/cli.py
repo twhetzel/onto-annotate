@@ -352,7 +352,7 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
                                     exact_synonyms = list(adapter.exact_synonyms(result))
                                     if exact_synonyms and any(str(s).strip().casefold() == norm_term for s in exact_synonyms):
                                         exact_synonym_match = True
-                            except:
+                            except Exception:
                                 pass
                         
                         # Only set match_type if we verified it's an exact synonym
@@ -955,24 +955,25 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
                         )
                         
                         if bioportal_result:
-                            # Get UUID for this term
+                            # Get all UUIDs for this term (may appear in multiple rows)
                             uuid_series = unmatched_df[unmatched_df[columns[0]] == bp_term]["UUID"]
                             if uuid_series.empty:
                                 continue
-                            uuid = uuid_series.iloc[0]
                             
                             bp_ontology = bioportal_result["ontology_acronym"].lower()
                             match_type_label = "EXACT_LABEL" if bioportal_result["match_type"] == "exact_label" else "EXACT_SYNONYM"
                             
-                            bioportal_hits.append(pd.DataFrame([{
-                                "UUID": uuid,
-                                "bioportal_result_curie": bioportal_result["curie"],
-                                "bioportal_result_label": bioportal_result["label"],
-                                "bioportal_result_match_type": match_type_label,
-                                "annotation_source": "bioportal",
-                                "annotation_method": "exact_label" if bioportal_result["match_type"] == "exact_label" else "exact_synonym",
-                                "ontology": bp_ontology
-                            }]))
+                            # Create a hit for each UUID that has this term
+                            for uuid in uuid_series:
+                                bioportal_hits.append(pd.DataFrame([{
+                                    "UUID": uuid,
+                                    "bioportal_result_curie": bioportal_result["curie"],
+                                    "bioportal_result_label": bioportal_result["label"],
+                                    "bioportal_result_match_type": match_type_label,
+                                    "annotation_source": "bioportal",
+                                    "annotation_method": "exact_label" if bioportal_result["match_type"] == "exact_label" else "exact_synonym",
+                                    "ontology": bp_ontology
+                                }]))
             elif bioportal_config.get("enabled", False):
                 logger.warning("BioPortal is enabled but API key or ontologies list is missing. Skipping BioPortal search.")
         

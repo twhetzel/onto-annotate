@@ -35,10 +35,11 @@ The YAML file has the following keys:
 - `ontologies`: List of ontology acronyms (as listed on [BioPortal](https://bioportal.bioontology.org/ontologies)) to search using OAK
 - `columns_to_annotate`: List of column header names in the input data file that contain the text to annotate
 - `output_dir`: (Optional) Output directory for annotated files (default: `data/output`)
-- `bioportal`: (Optional) BioPortal fallback search configuration:
-  - `enabled`: Boolean to enable/disable BioPortal search
-  - `ontologies`: List of ontology acronyms to search in BioPortal (searched in priority order)
-  - Note: Set `BIOPORTAL_API_KEY` environment variable to use this feature
+- `bioportal`: (Optional) Dictionary for BioPortal fallback search configuration:
+  - `enabled` (boolean): Enable/disable BioPortal search
+  - `ontologies` (list): List of ontology acronyms to search in BioPortal (searched in priority order)
+  
+  **Note:** Set `BIOPORTAL_API_KEY` environment variable to use this feature
 
 
 ## OpenAI API
