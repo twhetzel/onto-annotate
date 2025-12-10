@@ -62,7 +62,7 @@ The entity-type detector extracts entities of specified types from text that did
 **Pipeline order:**
 1. OAK exact match search (labels and synonyms)
 2. OpenAI alternative name generation
-3. LLM entity-type detection** (if enabled)
+3. LLM entity-type detection (if enabled)
 4. BioPortal fallback search
 
 **Getting suggested entity types:**
