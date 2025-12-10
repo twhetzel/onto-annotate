@@ -505,8 +505,13 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     }).reset_index()
 
     # Convert lists to strings (join with commas to preserve all matches)
-    search_results_df[f'{ontology_prefix}_result_curie'] = search_results_df[f'{ontology_prefix}_result_curie'].apply(lambda x: ', '.join(str(v) for v in x) if x else '')
-    search_results_df[f'{ontology_prefix}_result_label'] = search_results_df[f'{ontology_prefix}_result_label'].apply(lambda x: ', '.join(str(v) for v in x) if x else '')
+    # Remove duplicates while preserving order
+    search_results_df[f'{ontology_prefix}_result_curie'] = search_results_df[f'{ontology_prefix}_result_curie'].apply(
+        lambda x: ', '.join(str(v) for v in dict.fromkeys(x)) if x else ''  # dict.fromkeys preserves order and removes duplicates
+    )
+    search_results_df[f'{ontology_prefix}_result_label'] = search_results_df[f'{ontology_prefix}_result_label'].apply(
+        lambda x: ', '.join(str(v) for v in dict.fromkeys(x)) if x else ''  # dict.fromkeys preserves order and removes duplicates
+    )
     # For match_type, if there are multiple, prefer label over synonym, otherwise take first
     search_results_df[f'{ontology_prefix}_result_match_type'] = search_results_df[f'{ontology_prefix}_result_match_type'].apply(
         lambda x: 'exact_label' if 'exact_label' in x else (x[0] if x else '')
