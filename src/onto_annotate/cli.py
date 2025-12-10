@@ -22,10 +22,14 @@ import json
 import re
 import io
 from contextlib import contextmanager
+import requests
 
 
 DEMO_PREFIX = "demo:"
 DEMO_BASE = "demo_data"
+
+# BioPortal search cache: (term, ontology_acronyms_tuple, api_key) -> result
+_bioportal_cache: Dict[tuple, Optional[Dict]] = {}
 
 
 __all__ = [
@@ -209,6 +213,22 @@ def load_config(config_path):
         click.echo("Config error: 'columns_to_annotate' should be a list of strings", err=True)
         sys.exit(1)
 
+    # Validate BioPortal config if present
+    if "bioportal" in config:
+        bioportal = config["bioportal"]
+        if not isinstance(bioportal, dict):
+            click.echo("Config error: 'bioportal' should be a dictionary", err=True)
+            sys.exit(1)
+        
+        if "enabled" in bioportal and not isinstance(bioportal["enabled"], bool):
+            click.echo("Config error: 'bioportal.enabled' should be a boolean", err=True)
+            sys.exit(1)
+        
+        if "ontologies" in bioportal:
+            if not isinstance(bioportal["ontologies"], list) or not all(isinstance(o, str) for o in bioportal["ontologies"]):
+                click.echo("Config error: 'bioportal.ontologies' should be a list of strings", err=True)
+                sys.exit(1)
+
     return config
 
 
@@ -279,13 +299,169 @@ def clean_json_response(content: str) -> str:
     Clean common formatting issues in GPT output before JSON parsing.
     """
     # Replace smart quotes with standard quotes
-    content = content.replace("“", "\"").replace("”", "\"").replace("‘", "'").replace("’", "'")
+    content = content.replace(""", "\"").replace(""", "\"").replace("'", "'").replace("'", "'")
 
     # Strip any leading junk like ```json ... ```
     content = re.sub(r"^```(json)?\s*", "", content.strip())
     content = re.sub(r"\s*```$", "", content.strip())
 
     return content
+
+
+def normalize_bioportal_curie(bioportal_id: str) -> str:
+    """
+    Normalize BioPortal CURIE/URI to OAK format (PREFIX:ID).
+    
+    BioPortal may return:
+    - Full URI: http://purl.obolibrary.org/obo/MONDO_0006664
+    - CURIE: MONDO:0006664
+    - Other formats
+    
+    Returns normalized CURIE in format PREFIX:ID
+    """
+    if not bioportal_id:
+        return ""
+    
+    # If already in CURIE format (PREFIX:ID), return as-is
+    if re.match(r'^[A-Za-z0-9_]+:[A-Za-z0-9_]+$', bioportal_id):
+        return bioportal_id
+    
+    # Try to extract from URI format
+    # Pattern: http://purl.obolibrary.org/obo/PREFIX_ID
+    obo_match = re.search(r'/obo/([A-Za-z0-9_]+)_([A-Za-z0-9_]+)$', bioportal_id)
+    if obo_match:
+        prefix = obo_match.group(1)
+        identifier = obo_match.group(2)
+        return f"{prefix}:{identifier}"
+    
+    # Try other common URI patterns
+    # Pattern: http://.../PREFIX/ID or .../PREFIX#ID
+    uri_match = re.search(r'/([A-Za-z0-9_]+)[/#]([A-Za-z0-9_]+)$', bioportal_id)
+    if uri_match:
+        prefix = uri_match.group(1)
+        identifier = uri_match.group(2)
+        return f"{prefix}:{identifier}"
+    
+    # If no pattern matches, try to extract last part as ID
+    # and use a generic prefix
+    parts = bioportal_id.split('/')
+    if len(parts) > 1:
+        last_part = parts[-1]
+        # Try to split on underscore or colon
+        if '_' in last_part:
+            prefix, identifier = last_part.split('_', 1)
+            return f"{prefix}:{identifier}"
+        elif ':' in last_part:
+            return last_part
+    
+    # Fallback: return as-is if we can't normalize
+    logger.debug(f"Could not normalize BioPortal CURIE: {bioportal_id}")
+    return bioportal_id
+
+
+def search_bioportal(term: str, ontology_acronym: str, api_key: str, exact_match: bool = True) -> Optional[Dict]:
+    """
+    Search BioPortal REST API for a term in a specific ontology.
+    
+    Can search for exact matches on prefLabel or synonyms.
+    Both searches use require_exact_match=true, with different include parameters.
+    Results are cached to avoid repeated API calls.
+    
+    :param term: Search term
+    :param ontology_acronym: Ontology acronym to search (e.g., "ICD10CM")
+    :param api_key: BioPortal API key
+    :param exact_match: If True, search exact match on prefLabel (include=prefLabel). 
+                       If False, search exact match on synonyms (include=synonym).
+    :return: Dict with 'curie', 'label', 'ontology_acronym', 'match_type' if match found, None otherwise
+    """
+    if not api_key:
+        return None
+    
+    if not ontology_acronym:
+        return None
+    
+    # Check cache
+    cache_key = (term, ontology_acronym, api_key, exact_match)
+    if cache_key in _bioportal_cache:
+        return _bioportal_cache[cache_key]
+    
+    # Limit cache size to 1000 entries
+    if len(_bioportal_cache) >= 1000:
+        # Clear oldest 100 entries (simple FIFO)
+        keys_to_remove = list(_bioportal_cache.keys())[:100]
+        for key in keys_to_remove:
+            del _bioportal_cache[key]
+    
+    try:
+        url = "https://data.bioontology.org/search"
+        params = {
+            "q": term,
+            "ontologies": ontology_acronym,
+            "apikey": api_key,
+            "pagesize": 10,
+        }
+        
+        if exact_match:
+            # Search exact match on prefLabel
+            params["include"] = "prefLabel"
+            params["require_exact_match"] = "true"
+        else:
+            # Search exact match on synonyms (explicitly check returned synonyms)
+            params["include"] = "synonym"
+            params["require_exact_match"] = "true"
+            params["also_search_properties"] = "true"
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Walk results; enforce exact label when exact_match=True; enforce synonym equality when exact_match=False
+        if "collection" in data and len(data["collection"]) > 0:
+            for result in data["collection"]:
+                # Extract label
+                label = result.get("prefLabel", "") or result.get("label", "")
+                # Extract synonyms (may be list or missing)
+                synonyms = result.get("synonym", []) or []
+                
+                # Normalize term once
+                norm_term = term.strip().casefold()
+                
+                if exact_match:
+                    # Require exact (case-insensitive) label equality
+                    if not label or label.strip().casefold() != norm_term:
+                        continue
+                else:
+                    # Require at least one synonym that matches exactly (case-insensitive)
+                    if not any(isinstance(s, str) and s.strip().casefold() == norm_term for s in synonyms):
+                        continue
+                
+                # Extract CURIE/ID
+                curie_id = result.get("@id", "")
+                normalized_curie = normalize_bioportal_curie(curie_id)
+                if not normalized_curie:
+                    continue
+                
+                match_type = "exact_label" if exact_match else "synonym"
+                result_dict = {
+                    "curie": normalized_curie,
+                    "label": label,
+                    "ontology_acronym": ontology_acronym,
+                    "match_type": match_type
+                }
+                _bioportal_cache[cache_key] = result_dict
+                return result_dict
+    
+    except requests.exceptions.RequestException as e:
+        logger.debug(f"BioPortal API error for {ontology_acronym} (exact={exact_match}): {e}")
+        return None
+    except Exception as e:
+        logger.debug(f"Error processing BioPortal result for {ontology_acronym} (exact={exact_match}): {e}")
+        return None
+    
+    # Cache None result to avoid repeated failed searches
+    _bioportal_cache[cache_key] = None
+    return None
 
 
 def get_alternative_names(term: str) -> dict:
@@ -534,9 +710,90 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
 
 
         openai_hits_df = pd.concat(openai_hits, ignore_index=True) if openai_hits else pd.DataFrame()
+        
+        # Track all matched UUIDs so far
+        matched_uuids_all = matched_uuids_label | matched_uuids_syn
+        if not openai_hits_df.empty:
+            matched_uuids_openai = set(openai_hits_df["UUID"].dropna())
+            matched_uuids_all |= matched_uuids_openai
+        
+        # === BioPortal fallback search ===
+        bioportal_hits = []
+        bioportal_config = config_data.get("bioportal", {})
+        if bioportal_config.get("enabled", False):
+            # Get API key from environment variable
+            bioportal_api_key = os.getenv("BIOPORTAL_API_KEY", "")
+            bioportal_ontologies = bioportal_config.get("ontologies", [])
+            
+            if bioportal_api_key and bioportal_ontologies:
+                # Get terms that still have no match (after OAK and OpenAI)
+                unmatched_df = data_df[~data_df["UUID"].isin(matched_uuids_all)]
+                
+                if not unmatched_df.empty:
+                    # Search BioPortal for each ontology from bioportal.ontologies list
+                    for bp_term in tqdm(unmatched_df[columns[0]].dropna().unique(), desc="BioPortal search"):
+                        # Normalize the term (same as OpenAI)
+                        match = re.match(r"^(.*?)\s*\((\w{3,5})\)$", bp_term.strip())
+                        normalized_term = match.group(1).strip() if match else bp_term.strip()
+                        
+                        # Search each ontology from bioportal.ontologies list (in priority order)
+                        found_match = False
+                        for ontology_acronym in bioportal_ontologies:
+                            if found_match:
+                                break
+                            
+                            # First try exact match on prefLabel
+                            bioportal_result = search_bioportal(
+                                normalized_term,
+                                ontology_acronym.upper(),
+                                bioportal_api_key,
+                                exact_match=True
+                            )
+                            
+                            # If no exact match, try synonym search
+                            if not bioportal_result:
+                                bioportal_result = search_bioportal(
+                                    normalized_term,
+                                    ontology_acronym.upper(),
+                                    bioportal_api_key,
+                                    exact_match=False
+                                )
+                            
+                            if bioportal_result:
+                                # Get UUID for this term
+                                uuid_series = unmatched_df[unmatched_df[columns[0]] == bp_term]["UUID"]
+                                if uuid_series.empty:
+                                    continue
+                                uuid = uuid_series.iloc[0]
+                                
+                                # Normalize ontology
+                                bp_ontology = bioportal_result["ontology_acronym"].lower()
+                                
+                                # Determine match type label (non-prefixed, single set of BioPortal columns)
+                                match_type_label = "EXACT_LABEL" if bioportal_result["match_type"] == "exact_label" else "EXACT_SYNONYM"
+                                
+                                # Create result row with shared BioPortal columns
+                                bioportal_hits.append(pd.DataFrame([{
+                                    "UUID": uuid,
+                                    "bioportal_result_curie": bioportal_result["curie"],
+                                    "bioportal_result_label": bioportal_result["label"],
+                                    "bioportal_result_match_type": match_type_label,
+                                    "annotation_source": "bioportal",
+                                    "annotation_method": "exact_label" if bioportal_result["match_type"] == "exact_label" else "exact_synonym",
+                                    "ontology": bp_ontology
+                                }]))
+                                found_match = True
+                                break
+            elif bioportal_config.get("enabled", False):
+                logger.warning("BioPortal is enabled but API key or ontologies list is missing. Skipping BioPortal search.")
+        
+        bioportal_hits_df = pd.concat(bioportal_hits, ignore_index=True) if bioportal_hits else pd.DataFrame()
+        
         results_sources = [label_hits_df, synonym_hits_df]
         if not openai_hits_df.empty:
             results_sources.append(openai_hits_df)
+        if not bioportal_hits_df.empty:
+            results_sources.append(bioportal_hits_df)
 
         results_df = pd.concat(results_sources, ignore_index=True)
         if not results_df.empty:
