@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 
+import warnings
+
+# Suppress pkg_resources deprecation warnings from eutils/setuptools
+# Must be set before any imports that trigger eutils
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="pkg_resources")
+
 import click
 from datetime import datetime
 import uuid
@@ -232,13 +239,14 @@ def load_config(config_path):
     return config
 
 
-def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFrame, columns: list, config: dict) -> pd.DataFrame:
+def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFrame, columns: list, config: dict, desc: str = None) -> pd.DataFrame:
     """
     Search for exact matches to the ontology term label or synonym.
     Supports both single-property searches (LABEL or ALIAS) and combined searches (both).
     :param adapter: The connector to the ontology database.
     :param df: Dataframe containing terms to search and find matches to the ontology.
     :param config: SearchConfiguration with properties to search (can be LABEL, ALIAS, or both).
+    :param desc: Optional custom description for progress bar.
     """
 
     ontology_prefix = 'hpo' if ontology_id.lower() == 'hp' else ontology_id
@@ -251,7 +259,8 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
     is_combined_search = 'LABEL' in properties and 'ALIAS' in properties
 
     # Create a tqdm instance to display search progress
-    progress_bar = tqdm(total=len(df), desc=f"OAK {ontology_id} search",
+    progress_desc = desc if desc else f"OAK {ontology_id} search"
+    progress_bar = tqdm(total=len(df), desc=progress_desc,
                         bar_format='{desc}: [{bar}] {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
                         ascii=' #',
                         ncols=80)
@@ -784,7 +793,7 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
         label_hits_df["annotation_source"] = "oak"
         label_hits_df["annotation_method"] = "exact_label"
         label_hits_df["ontology"] = ontology_id.lower()
-        
+
         synonym_hits_df["annotation_source"] = "oak"
         synonym_hits_df["annotation_method"] = "exact_synonym"
         synonym_hits_df["ontology"] = ontology_id.lower()
@@ -796,6 +805,9 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
         # === OpenAI alternative names ===
         openai_hits = []
         if not no_openai:
+            # Step 1: Collect all alternative terms from OpenAI
+            all_alt_terms_data = []  # List of dicts: {uuid, original_term, original_row_term, alt_term, alt_names}
+            
             for term in tqdm(filtered_df[columns[0]].dropna().unique(), desc="OpenAI search",
                             bar_format='{desc}: [{bar}] {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]',
                             ascii=' #',
@@ -813,43 +825,106 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
                     continue
                 uuid = uuid_series.iloc[0]
 
-                found_match = False
-
+                # Collect all alternative terms for batch search
                 for alt in alt_response.get("alt_names", []):
-                    # Search with combined config (label and synonym)
-                    df_search = pd.DataFrame({"UUID": [uuid], columns[0]: [alt]})
-                    match_df = search_ontology(ontology_id, adapter, df_search, columns, combined_config)
-                    if not match_df.empty:
-                        match_type = match_df[f'{ontology_prefix}_result_match_type'].iloc[0]
-                        if match_type == 'exact_label':
-                            match_df["annotation_source"] = "openai"
-                            match_df["annotation_method"] = "alt_term_label"
-                        else:
-                            match_df["annotation_source"] = "openai"
-                            match_df["annotation_method"] = "alt_term_synonym"
-                        match_df["original_term"] = normalized_term
-                        match_df["ontology"] = ontology_id.lower()
-                        openai_hits.append(match_df)
-                        found_match = True
-                        break
+                    all_alt_terms_data.append({
+                        "uuid": uuid,
+                        "original_term": normalized_term,
+                        "original_row_term": term,
+                        "alt_term": alt,
+                        "alt_names": alt_response.get("alt_names", [])
+                    })
+            
+            # Step 2: Batch search all alternative terms at once
+            if all_alt_terms_data:
+                # Print status message for curator visibility
+                num_alt_terms = len(all_alt_terms_data)
+                num_original_terms = len(set(item["uuid"] for item in all_alt_terms_data))
+                print(f"\n🔍 Searching {num_alt_terms} LLM-generated alternative terms (from {num_original_terms} original terms) against OAK {ontology_id.upper()}...")
+                
+                # Create dataframe for batch OAK search
+                alt_search_df = pd.DataFrame([
+                    {"UUID": item["uuid"], columns[0]: item["alt_term"]}
+                    for item in all_alt_terms_data
+                ])
+                
+                # Single OAK search for all alternative terms with custom description
+                alt_matches_df = search_ontology(
+                    ontology_id, 
+                    adapter, 
+                    alt_search_df, 
+                    columns, 
+                    combined_config,
+                    desc=f"OAK {ontology_id} (LLM alt terms)"
+                )
+                
+                # Step 3: Process matches and map back to original terms
+                # Track which original UUIDs found matches (only first match per UUID)
+                matched_original_uuids = set()
+                
+                if not alt_matches_df.empty:
+                    # Process matches, keeping only first match per original UUID
+                    for _, match_row in alt_matches_df.iterrows():
+                        match_uuid = match_row["UUID"]
+                        
+                        # Skip if we already have a match for this original UUID
+                        if match_uuid in matched_original_uuids:
+                            continue
+                        
+                        # Find the original data for this UUID
+                        # Since all alt_terms for a UUID come from the same original term,
+                        # we can use any of them to get the original_data
+                        original_data = None
+                        for item in all_alt_terms_data:
+                            if item["uuid"] == match_uuid:
+                                original_data = item
+                                break
 
-                if not found_match:
-                    openai_hits.append(pd.DataFrame([{
-                        "UUID": uuid,
+                        if original_data:
+                            # Tag the match with OpenAI metadata
+                            # Convert Series to dict for safe modification
+                            match_dict = match_row.to_dict()
+                            match_type = match_dict.get(f'{ontology_prefix}_result_match_type', '')
+                            
+                            if match_type == 'exact_label':
+                                match_dict["annotation_source"] = "openai"
+                                match_dict["annotation_method"] = "alt_term_label"
+                            else:
+                                match_dict["annotation_source"] = "openai"
+                                match_dict["annotation_method"] = "alt_term_synonym"
+                            match_dict["original_term"] = original_data["original_term"]
+                            match_dict["ontology"] = ontology_id.lower()
+                            
+                            # Create a single-row dataframe for this match
+                            match_df = pd.DataFrame([match_dict])
+                            openai_hits.append(match_df)
+                            matched_original_uuids.add(match_uuid)
+                
+                # Step 4: Track terms that didn't match (for BioPortal)
+                # Create records for original terms that had no matches
+                processed_no_match_uuids = set()
+                for item in all_alt_terms_data:
+                    if item["uuid"] not in matched_original_uuids and item["uuid"] not in processed_no_match_uuids:
+                        openai_hits.append(pd.DataFrame([{
+                            "UUID": item["uuid"],
                         "annotation_source": "openai",
                         "annotation_method": "no_match",
-                        "original_term": normalized_term,
-                        "alt_names": ', '.join(alt_response.get("alt_names", [])),
+                            "original_term": item["original_term"],
+                            "alt_names": ', '.join(item["alt_names"]),
                         "ontology": ontology_id.lower()
-                    }]))
+                        }]))
+                        processed_no_match_uuids.add(item["uuid"])
 
 
         openai_hits_df = pd.concat(openai_hits, ignore_index=True) if openai_hits else pd.DataFrame()
         
-        # Track all matched UUIDs so far
+        # Track all matched UUIDs so far (OAK + OpenAI, excluding no_match records)
         matched_uuids_all = set(combined_hits_df["UUID"])
         if not openai_hits_df.empty:
-            matched_uuids_openai = set(openai_hits_df["UUID"].dropna())
+            # Only count UUIDs that actually matched (not no_match records)
+            matched_uuids_openai = set(
+                openai_hits_df[openai_hits_df["annotation_method"] != "no_match"]["UUID"].dropna()
+            )
             matched_uuids_all |= matched_uuids_openai
         
         # === BioPortal fallback search ===
