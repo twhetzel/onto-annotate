@@ -311,13 +311,13 @@ def get_alternative_names(term: str) -> dict:
 
     try:
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        response = client.chat.completions.create(
+        response = client.responses.create(
             model="gpt-4.1",
-            messages=[{"role": "user", "content": prompt}],
+            input=prompt,
             temperature=0.5,
-            max_tokens=150,
+            max_output_tokens=150,
         )
-        content = response.choices[0].message.content
+        content = response.output_text
         cleaned = clean_json_response(content)
         result = json.loads(cleaned)
         return result
