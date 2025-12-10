@@ -12,10 +12,14 @@ The prerequisites to run the script can either be installed using the `requireme
 
 ### Commands
 `pip install -r requirements.txt`
- 
- Or
+Followed by: 
+`python -m venv .venv && source .venv/bin/activate`
 
- `conda env create -f environment.yml`
+** OR **
+
+`conda env create -f environment.yml`
+Followed by:
+`conda activate onto-annotate`
 
 ## Install in editable mode
 To make the `onto-annotate` command available in your environment from the root of the project directory run:
@@ -39,10 +43,10 @@ The tool has an option to use the OpenAI API to annotate text not otherwise matc
 Annotate your text files (without AI assistance) as:
 ```
 onto-annotate annotate \
-    --config config/config.yml \
-    --input_file data/demo_data/conditions_simple.tsv \
-    --output_dir data/output \
-    --no_openai  # Remove this flag to annotate with AI assistance
+  --config config/config.yml \
+  --input_file demo:conditions_simple.tsv \
+  --output_dir data/output \
+  --no_openai  # Remove this flag to annotate with AI assistance
 ```
 
 NOTES:
