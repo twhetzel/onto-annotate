@@ -297,8 +297,20 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
         norm_term = str(search_term).strip().casefold()
         candidates = []
         
-        for result in adapter.basic_search(search_term, config=config):
+        # Debug: Log search for entity detector
+        if desc and "entity detection" in desc.lower():
+            logger.debug(f"Searching '{search_term}' (normalized: '{norm_term}')")
+        
+        search_results = list(adapter.basic_search(search_term, config=config))
+        if desc and "entity detection" in desc.lower():
+            logger.debug(f"  OAK basic_search returned {len(search_results)} results")
+        
+        for result in search_results:
             label = adapter.label(result)
+            
+            # Debug: Log search results for entity detector
+            if desc and "entity detection" in desc.lower():
+                logger.debug(f"  Search result for '{search_term}': {result} -> {label}")
             
             # Determine match type
             match_type = None
@@ -395,6 +407,11 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
                         "label": label,
                         "match_type": match_type
                     })
+                    if desc and "entity detection" in desc.lower():
+                        logger.debug(f"    Added candidate: {result} ({label}) as {match_type}")
+                else:
+                    if desc and "entity detection" in desc.lower():
+                        logger.debug(f"    Skipped candidate: {result} ({label}) - no match type determined")
             else:
                 # Single property search - determine type from config
                 if 'LABEL' in properties:
@@ -414,10 +431,17 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
             # Add all candidates (sorted with label matches first)
             for candidate in candidates:
                 exact_search_results.append([row["UUID"], candidate["curie"], candidate["label"], candidate["match_type"]])
+                if desc and "entity detection" in desc.lower():
+                    logger.debug(f"  Added to results: {candidate['curie']} ({candidate['label']}) as {candidate['match_type']}")
         elif candidates:
             # For single property search, take all candidates
             for candidate in candidates:
                 exact_search_results.append([row["UUID"], candidate["curie"], candidate["label"], candidate["match_type"]])
+                if desc and "entity detection" in desc.lower():
+                    logger.debug(f"  Added to results: {candidate['curie']} ({candidate['label']}) as {candidate['match_type']}")
+        
+        if desc and "entity detection" in desc.lower() and not candidates:
+            logger.debug(f"  No candidates added for '{search_term}'")
         
         # Update the progress bar after processing each row
         progress_bar.update(1)
@@ -436,8 +460,31 @@ def search_ontology(ontology_id: str, adapter: SqlImplementation, df: pd.DataFra
         results_df.columns = ['UUID', f'{ontology_prefix}_result_curie', f'{ontology_prefix}_result_label', f'{ontology_prefix}_result_match_type']
 
     # Filter rows to keep those where '{ontology}_result_curie' starts with the "ontology_id", keep in mind hp vs. hpo
+    # For HP, accept both "HP:" and "HPO:" prefixes since different sources use different prefixes
     # TODO: Decide whether these results should still be filtered out
-    results_df = results_df[results_df[f'{ontology_prefix}_result_curie'].str.startswith(f'{ontology_id}'.upper())]
+    if not results_df.empty:
+        before_filter = len(results_df)
+        if ontology_id.lower() == 'hp':
+            # For HP, accept both HP: and HPO: prefixes
+            filter_condition = results_df[f'{ontology_prefix}_result_curie'].str.startswith('HP:', na=False) | \
+                              results_df[f'{ontology_prefix}_result_curie'].str.startswith('HPO:', na=False)
+            results_df = results_df[filter_condition]
+            after_filter = len(results_df)
+            if before_filter != after_filter:
+                logger.debug(f"HP filter: {before_filter} -> {after_filter} rows (accepting both HP: and HPO: prefixes)")
+                # Log what was filtered out
+                filtered_out = pd.DataFrame(exact_search_results)
+                if not filtered_out.empty:
+                    filtered_out.columns = ['UUID', f'{ontology_prefix}_result_curie', f'{ontology_prefix}_result_label', f'{ontology_prefix}_result_match_type']
+                    removed = filtered_out[~filter_condition]
+                    if not removed.empty:
+                        logger.debug(f"Filtered out {len(removed)} HP results: {removed[f'{ontology_prefix}_result_curie'].tolist()[:5]}")
+        else:
+            before_filter = len(results_df)
+            results_df = results_df[results_df[f'{ontology_prefix}_result_curie'].str.startswith(f'{ontology_id}'.upper(), na=False)]
+            after_filter = len(results_df)
+            if before_filter != after_filter and desc and "entity detection" in desc.lower():
+                logger.debug(f"Filter: {before_filter} -> {after_filter} rows for {ontology_id}")
 
     # Group by 'UUID' and aggregate curie and label into lists
     search_results_df = results_df.groupby('UUID').agg({
@@ -688,17 +735,22 @@ def detect_entities_by_type(text: str, entity_types: list[str]) -> list[dict]:
     # Create prompt for entity detection
     entity_types_str = ", ".join(entity_types)
     prompt = (
-        f"Given the following text, are there any entities of type {entity_types_str}? "
-        f"Return a JSON object with a list of entities found. "
-        f"Each entity should have 'span' (the exact text span from the input) and 'label' (the entity name).\n\n"
+        f"Given the following text, identify all entities of type {entity_types_str}. "
+        f"Return a JSON object with a list of entities found.\n\n"
+        f"For each entity:\n"
+        f"- 'span': the exact text span from the input text that refers to this entity\n"
+        f"- 'label': the canonical name of the entity (not the entity type, but the actual entity name)\n\n"
         f"Text: {text}\n\n"
         f"Return format:\n"
         "{\n"
         '  "entities": [\n'
-        '    {"span": "text span", "label": "entity name"},\n'
-        '    {"span": "another span", "label": "another entity"}\n'
+        '    {"span": "exact text from input", "label": "canonical entity name"},\n'
+        '    {"span": "another exact text", "label": "another canonical name"}\n'
         "  ]\n"
-        "}"
+        "}\n\n"
+        f"Example: If the text contains 'ASD' and you're looking for phenotypes, return:\n"
+        '{"entities": [{"span": "ASD", "label": "Atrial septal defect"}]}\n'
+        f"NOT: {{'entities': [{{'span': 'ASD', 'label': '{entity_types[0]}'}}]}}"
     )
     
     try:
@@ -710,23 +762,31 @@ def detect_entities_by_type(text: str, entity_types: list[str]) -> list[dict]:
             max_output_tokens=300,
         )
         content = response.output_text
+        logger.debug(f"Raw LLM entity detection response for '{text[:50]}...': {content[:200]}")
         cleaned = clean_json_response(content)
         result = json.loads(cleaned)
         
         # Extract entities list
         entities = result.get("entities", [])
         if not isinstance(entities, list):
+            logger.debug(f"LLM response 'entities' is not a list: {type(entities)}")
             return []
         
         # Validate and return entities
         valid_entities = []
         for entity in entities:
             if isinstance(entity, dict) and "span" in entity and "label" in entity:
+                span = str(entity["span"])
+                label = str(entity["label"])
+                logger.debug(f"Detected entity: span='{span}', label='{label}'")
                 valid_entities.append({
-                    "span": str(entity["span"]),
-                    "label": str(entity["label"])
+                    "span": span,
+                    "label": label
                 })
+            else:
+                logger.debug(f"Skipping invalid entity structure: {entity}")
         
+        logger.debug(f"Returning {len(valid_entities)} valid entities from LLM response")
         return valid_entities
         
     except json.JSONDecodeError as e:
@@ -810,8 +870,6 @@ def suggest_entity_types_cmd(ontology, output):
     """
     Suggest entity types for ontologies based on OBO Foundry metadata.
     """
-    from onto_annotate.entity_type_helper import suggest_entity_types_for_multiple
-    
     ontology_list = list(ontology)
     click.echo(f"Fetching entity type suggestions for: {', '.join(ontology_list)}")
     
@@ -1141,10 +1199,16 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
                         # Create dataframe for batch OAK search using temporary IDs
                         # This ensures each entity gets its own search result, even if multiple entities
                         # come from the same original text
+                        # Use entity_span (exact text from input) for search, fallback to entity_label
                         entity_search_df = pd.DataFrame([
-                            {"UUID": item["temp_id"], columns[0]: item["entity_label"]}
+                            {"UUID": item["temp_id"], columns[0]: item.get("entity_span") or item["entity_label"]}
                             for item in all_entity_data
                         ])
+                        
+                        # Debug: Log what entities are being searched
+                        logger.debug(f"Entity search dataframe ({len(entity_search_df)} rows):")
+                        for idx, row in entity_search_df.head(10).iterrows():
+                            logger.debug(f"  {row['UUID']}: searching '{row[columns[0]]}'")
                         
                         # Single OAK search for all detected entities
                         entity_matches_df = search_ontology(
@@ -1155,6 +1219,14 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
                             combined_config,
                             desc=f"OAK {ontology_id} (entity detection)"
                         )
+                        
+                        # Debug: Log search results
+                        logger.debug(f"Entity detector OAK search returned {len(entity_matches_df)} matches")
+                        if not entity_matches_df.empty:
+                            logger.debug(f"Sample entity matches: {entity_matches_df.head().to_dict('records')}")
+                            # Log all temp_ids in results
+                            logger.debug(f"Temp IDs in results: {entity_matches_df['UUID'].tolist()[:10]}")
+                            logger.debug(f"Temp IDs in entity_data: {list(temp_id_to_entity_data.keys())[:10]}")
                         
                         # Process matches and map back to original entity data using temp_id
                         matched_entity_temp_ids = set()
@@ -1169,10 +1241,18 @@ def annotate(config: str, input_file: str, output_dir: str, refresh: bool, no_op
                                 
                                 # Skip if we already processed this temp_id
                                 if match_temp_id in matched_entity_temp_ids:
+                                    logger.debug(f"Skipping duplicate temp_id: {match_temp_id}")
                                     continue
                                 
                                 # Look up the original entity data using temp_id
                                 original_entity_data = temp_id_to_entity_data.get(match_temp_id)
+                                
+                                if original_entity_data:
+                                    match_dict = match_row.to_dict()
+                                    logger.debug(f"Processing entity match: temp_id={match_temp_id}, entity={original_entity_data.get('entity_label')}, curie={match_dict.get(f'{ontology_prefix}_result_curie', 'N/A')}")
+                                else:
+                                    logger.warning(f"Could not find entity data for temp_id: {match_temp_id}. Available temp_ids: {list(temp_id_to_entity_data.keys())[:5]}")
+                                    continue
                                 
                                 if original_entity_data:
                                     # Tag the match

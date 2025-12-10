@@ -76,7 +76,6 @@ def get_ontology_metadata(ontology_id: str, obo_data: Optional[Dict] = None) -> 
         
         if (ont_id == ontology_id_lower or 
             prefix == ontology_id_lower or
-            (ontology_id_lower == "hp" and ont_id == "hp") or
             (ontology_id_lower == "hpo" and ont_id == "hp")):
             return ontology
     
